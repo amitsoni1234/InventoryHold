@@ -1,0 +1,11 @@
+bin/
+obj/
+.vs/
+*.user
+frontend/node_modules/
+frontend/dist/
+.idea/
+
+# Original .NET 9 weather template. The assignment solution is InventoryHold.slnx.
+/Assignment*.csproj
+/Assignment*.http

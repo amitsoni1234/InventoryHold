@@ -1,0 +1,85 @@
+services:
+  mongodb:
+    image: mongo:7
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  mongo-init:
+    image: mongo:7
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    restart: "no"
+    entrypoint:
+      - bash
+      - -c
+      - |
+        for i in $$(seq 1 30); do
+          mongosh --host mongodb:27017 --quiet --eval 'try { if (rs.status().ok) quit(0); } catch (e) { rs.initiate({_id:"rs0", members:[{_id:0, host:"mongodb:27017"}]}); }' && exit 0
+          sleep 2
+        done
+        exit 1
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      Mongo__ConnectionString: mongodb://mongodb:27017/?replicaSet=rs0
+      Mongo__DatabaseName: inventory_hold
+      Redis__ConnectionString: redis:6379,abortConnect=false
+      Redis__InventoryTtlSeconds: "10"
+      RabbitMq__Host: rabbitmq
+      RabbitMq__Port: "5672"
+      RabbitMq__Username: guest
+      RabbitMq__Password: guest
+      RabbitMq__Exchange: inventory.holds
+      Holds__DurationMinutes: "15"
+      Holds__ExpirationPollSeconds: "10"
+      Cors__Origins__0: http://localhost:5173
+    depends_on:
+      mongo-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+volumes:
+  mongo-data:
